@@ -15,6 +15,7 @@
 #include <linux/pagewalk.h>
 #include <linux/sched/mm.h>
 
+#include "../internal.h"
 #include "ops-common.h"
 
 #ifdef CONFIG_DAMON_VADDR_KUNIT_TEST
@@ -650,6 +651,88 @@ static unsigned long damos_madvise(struct damon_target *target,
 }
 #endif	/* CONFIG_ADVISE_SYSCALLS */
 
+struct damos_va_interleave_private {
+	struct list_head local_folios;
+	struct list_head remote_folios;
+	struct damos *scheme;
+	int int_ratio;
+	unsigned long count;
+};
+
+static int damos_interleave_pte(pte_t *pte, unsigned long addr,
+		unsigned long next, struct mm_walk *walk)
+{
+	struct damos_va_interleave_private *priv = walk->private;
+	struct folio *folio;
+
+	if (pte_none(*pte) || !pte_present(*pte))
+		return 0;
+
+	folio = vm_normal_folio(walk->vma, addr, *pte);
+	if (!folio)
+		return 0;
+	folio_get(folio);
+
+	if (damos_filter_out_folio(priv->scheme, folio))
+		goto put_folio;
+
+	if (!folio_isolate_lru(folio))
+		goto put_folio;
+
+	// Only move the pages if they are in the opposite node
+	if (priv->count % 100 < priv->int_ratio && folio_nid(folio) != 0)
+		list_add(&folio->lru, &priv->local_folios);
+	else if (priv->count % 100 >= priv->int_ratio && folio_nid(folio) != 1)
+		list_add(&folio->lru, &priv->remote_folios);
+	else
+		folio_putback_lru(folio);
+
+	priv->count++;
+
+put_folio:
+	folio_put(folio);
+
+	return 0;
+}
+
+static unsigned long damos_va_interleave(struct damon_target *target,
+		struct damon_region *r, struct damos *s)
+{
+	struct damos_va_interleave_private priv;
+	struct mm_struct *mm;
+	int ret;
+	unsigned long applied;
+	unsigned long local_count = 0;
+	unsigned long remote_count = 0;
+	struct mm_walk_ops walk_ops = {
+		.pte_entry = damos_interleave_pte,
+	};
+
+	INIT_LIST_HEAD(&priv.local_folios);
+	INIT_LIST_HEAD(&priv.remote_folios);
+	priv.scheme = s;
+	priv.int_ratio = 50;
+	priv.count = 0;
+
+	mm = damon_get_mm(target);
+	if (!mm)
+		return 0;
+
+	mmap_read_lock(mm);
+
+	ret = walk_page_range(mm, r->ar.start, r->ar.end, &walk_ops, &priv);
+
+	mmap_read_unlock(mm);
+	mmput(mm);
+
+	local_count = damon_migrate_pages(&priv.local_folios, 0);
+	remote_count = damon_migrate_pages(&priv.remote_folios, 1);
+
+	applied = local_count + remote_count;
+
+	return applied * PAGE_SIZE;
+}
+
 static unsigned long damon_va_apply_scheme(struct damon_ctx *ctx,
 		struct damon_target *t, struct damon_region *r,
 		struct damos *scheme)
@@ -672,6 +755,8 @@ static unsigned long damon_va_apply_scheme(struct damon_ctx *ctx,
 	case DAMOS_NOHUGEPAGE:
 		madv_action = MADV_NOHUGEPAGE;
 		break;
+	case DAMOS_INTERLEAVE:
+		return damos_va_interleave(t, r, scheme);
 	case DAMOS_STAT:
 		return 0;
 	default:

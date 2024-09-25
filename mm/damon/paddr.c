@@ -267,7 +267,7 @@ keep:
 	return nr_migrated;
 }
 
-static unsigned long damon_pa_migrate_pages(struct list_head *folio_list,
+unsigned long damon_migrate_pages(struct list_head *folio_list,
 					    int target_nid)
 {
 	int nid;
@@ -324,7 +324,7 @@ static unsigned long damon_pa_migrate(struct damon_region *r, struct damos *s)
 put_folio:
 		folio_put(folio);
 	}
-	applied = damon_pa_migrate_pages(&folio_list, s->target_nid);
+	applied = damon_migrate_pages(&folio_list, s->target_nid);
 	cond_resched();
 	return applied * PAGE_SIZE;
 }

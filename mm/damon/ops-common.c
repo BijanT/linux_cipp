@@ -262,3 +262,4 @@ bool damos_filter_out_folio(struct damos *scheme, struct folio *folio)
 	}
 	return false;
 }
+
