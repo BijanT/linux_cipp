@@ -16,3 +16,7 @@ int damon_cold_score(struct damon_ctx *c, struct damon_region *r,
 			struct damos *s);
 int damon_hot_score(struct damon_ctx *c, struct damon_region *r,
 			struct damos *s);
+
+void damon_folio_mkold(struct folio *folio);
+bool damon_folio_young(struct folio *folio);
+bool damos_filter_out_folio(struct damos *scheme, struct folio *folio);
