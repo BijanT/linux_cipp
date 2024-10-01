@@ -658,6 +658,7 @@ struct damon_sysfs_watermarks {
 	unsigned long high;
 	unsigned long mid;
 	unsigned long low;
+	unsigned long sysfs_val;
 };
 
 static struct damon_sysfs_watermarks *damon_sysfs_watermarks_alloc(
@@ -675,6 +676,7 @@ static struct damon_sysfs_watermarks *damon_sysfs_watermarks_alloc(
 	watermarks->high = high;
 	watermarks->mid = mid;
 	watermarks->low = low;
+	watermarks->sysfs_val = 0;
 	return watermarks;
 }
 
@@ -682,6 +684,7 @@ static struct damon_sysfs_watermarks *damon_sysfs_watermarks_alloc(
 static const char * const damon_sysfs_wmark_metric_strs[] = {
 	"none",
 	"free_mem_rate",
+	"sysfs",
 };
 
 static ssize_t metric_show(struct kobject *kobj, struct kobj_attribute *attr,
@@ -786,6 +789,25 @@ static ssize_t low_store(struct kobject *kobj,
 	return err ? err : count;
 }
 
+static ssize_t sysfs_val_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
+			struct damon_sysfs_watermarks, kobj);
+
+	return sysfs_emit(buf, "%lu\n", watermarks->sysfs_val);
+}
+
+static ssize_t sysfs_val_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	struct damon_sysfs_watermarks *watermarks = container_of(kobj,
+			struct damon_sysfs_watermarks, kobj);
+	int err = kstrtoul(buf, 0, &watermarks->sysfs_val);
+
+	return err ? err : count;
+}
+
 static void damon_sysfs_watermarks_release(struct kobject *kobj)
 {
 	kfree(container_of(kobj, struct damon_sysfs_watermarks, kobj));
@@ -806,12 +828,16 @@ static struct kobj_attribute damon_sysfs_watermarks_mid_attr =
 static struct kobj_attribute damon_sysfs_watermarks_low_attr =
 		__ATTR_RW_MODE(low, 0600);
 
+static struct kobj_attribute damon_sysfs_watermarks_sysfs_val_attr =
+		__ATTR_RW_MODE(sysfs_val, 0600);
+
 static struct attribute *damon_sysfs_watermarks_attrs[] = {
 	&damon_sysfs_watermarks_metric_attr.attr,
 	&damon_sysfs_watermarks_interval_us_attr.attr,
 	&damon_sysfs_watermarks_high_attr.attr,
 	&damon_sysfs_watermarks_mid_attr.attr,
 	&damon_sysfs_watermarks_low_attr.attr,
+	&damon_sysfs_watermarks_sysfs_val_attr.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(damon_sysfs_watermarks);
@@ -2063,6 +2089,7 @@ static struct damos *damon_sysfs_mk_scheme(
 		.high = sysfs_wmarks->high,
 		.mid = sysfs_wmarks->mid,
 		.low = sysfs_wmarks->low,
+		.sysfs_val = sysfs_wmarks->sysfs_val,
 	};
 
 	scheme = damon_new_scheme(&pattern, sysfs_scheme->action,

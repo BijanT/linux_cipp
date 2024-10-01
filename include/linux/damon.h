@@ -246,11 +246,13 @@ struct damos_quota {
  *
  * @DAMOS_WMARK_NONE:		Ignore the watermarks of the given scheme.
  * @DAMOS_WMARK_FREE_MEM_RATE:	Free memory rate of the system in [0,1000].
+ * @DAMOS_WMARK_SYSFS: Use a value provided via sysfs
  * @NR_DAMOS_WMARK_METRICS:	Total number of DAMOS watermark metrics
  */
 enum damos_wmark_metric {
 	DAMOS_WMARK_NONE,
 	DAMOS_WMARK_FREE_MEM_RATE,
+	DAMOS_WMARK_SYSFS,
 	NR_DAMOS_WMARK_METRICS,
 };
 
@@ -261,6 +263,7 @@ enum damos_wmark_metric {
  * @high:	High watermark.
  * @mid:	Middle watermark.
  * @low:	Low watermark.
+ * @sysfs_val: Value to use for watermark if metric is set to DAMOS_WMARK_SYSFS
  *
  * If &metric is &DAMOS_WMARK_NONE, the scheme is always active.  Being active
  * means DAMON does monitoring and applying the action of the scheme to
@@ -277,6 +280,7 @@ struct damos_watermarks {
 	unsigned long high;
 	unsigned long mid;
 	unsigned long low;
+	unsigned long sysfs_val;
 
 /* private: */
 	bool activated;

@@ -1834,14 +1834,17 @@ static bool kdamond_need_stop(struct damon_ctx *ctx)
 	return true;
 }
 
-static int damos_get_wmark_metric_value(enum damos_wmark_metric metric,
+static int damos_get_wmark_metric_value(struct damos_watermarks *wmarks,
 					unsigned long *metric_value)
 {
-	switch (metric) {
+	switch (wmarks->metric) {
 	case DAMOS_WMARK_FREE_MEM_RATE:
 		*metric_value = global_zone_page_state(NR_FREE_PAGES) * 1000 /
 		       totalram_pages();
 		return 0;
+    case DAMOS_WMARK_SYSFS:
+        *metric_value = wmarks->sysfs_val;
+        return 0;
 	default:
 		break;
 	}
@@ -1856,7 +1859,7 @@ static unsigned long damos_wmark_wait_us(struct damos *scheme)
 {
 	unsigned long metric;
 
-	if (damos_get_wmark_metric_value(scheme->wmarks.metric, &metric))
+	if (damos_get_wmark_metric_value(&scheme->wmarks, &metric))
 		return 0;
 
 	/* higher than high watermark or lower than low watermark */
