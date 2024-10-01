@@ -132,7 +132,11 @@ struct mempolicy *__get_vma_policy(struct vm_area_struct *vma,
 struct mempolicy *get_vma_policy(struct vm_area_struct *vma,
 		unsigned long addr, int order, pgoff_t *ilx);
 bool vma_policy_mof(struct vm_area_struct *vma);
+nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *pol,
+				   pgoff_t ilx, int *nid);
 
+extern long do_set_mempolicy(unsigned short mode, unsigned short flags,
+		nodemask_t *nodes);
 extern void numa_default_policy(void);
 extern void numa_policy_init(void);
 extern void mpol_rebind_task(struct task_struct *tsk, const nodemask_t *new);

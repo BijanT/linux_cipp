@@ -456,8 +456,6 @@ static const struct mempolicy_operations mpol_ops[MPOL_MAX] = {
 
 static bool migrate_folio_add(struct folio *folio, struct list_head *foliolist,
 				unsigned long flags);
-static nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *pol,
-				pgoff_t ilx, int *nid);
 
 static bool strictly_unmovable(unsigned long flags)
 {
@@ -842,7 +840,7 @@ static int mbind_range(struct vma_iterator *vmi, struct vm_area_struct *vma,
 }
 
 /* Set the process memory policy */
-static long do_set_mempolicy(unsigned short mode, unsigned short flags,
+long do_set_mempolicy(unsigned short mode, unsigned short flags,
 			     nodemask_t *nodes)
 {
 	struct mempolicy *new, *old;
@@ -2040,7 +2038,7 @@ static unsigned int interleave_nid(struct mempolicy *pol, pgoff_t ilx)
  * Return a nodemask representing a mempolicy for filtering nodes for
  * page allocation, together with preferred node id (or the input node id).
  */
-static nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *pol,
+nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *pol,
 				   pgoff_t ilx, int *nid)
 {
 	nodemask_t *nodemask = NULL;

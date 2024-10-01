@@ -9,6 +9,7 @@
 
 #include <linux/highmem.h>
 #include <linux/hugetlb.h>
+#include <linux/mempolicy.h>
 #include <linux/mman.h>
 #include <linux/mmu_notifier.h>
 #include <linux/page_idle.h>
@@ -662,15 +663,26 @@ struct damos_va_interleave_private {
 static int damos_interleave_pte(pte_t *pte, unsigned long addr,
 		unsigned long next, struct mm_walk *walk)
 {
+	struct mempolicy *pol;
+	pgoff_t ilx;
+	int target_nid;
 	struct damos_va_interleave_private *priv = walk->private;
 	struct folio *folio;
 
 	if (pte_none(*pte) || !pte_present(*pte))
 		return 0;
 
+	pol = get_vma_policy(walk->vma, addr, 0, &ilx);
+	if (!pol)
+		return 0;
+	else if (pol->mode != MPOL_WEIGHTED_INTERLEAVE)
+		goto put_pol;
+
+	policy_nodemask(0, pol, ilx, &target_nid);
+
 	folio = vm_normal_folio(walk->vma, addr, *pte);
 	if (!folio)
-		return 0;
+		goto put_pol;
 	folio_get(folio);
 
 	if (damos_filter_out_folio(priv->scheme, folio))
@@ -680,15 +692,17 @@ static int damos_interleave_pte(pte_t *pte, unsigned long addr,
 		goto put_folio;
 
 	// Only move the pages if they are in the opposite node
-	if (priv->count % 100 < priv->int_ratio && folio_nid(folio) != 0)
+	if (target_nid == 0 && folio_nid(folio) != 0)
 		list_add(&folio->lru, &priv->local_folios);
-	else if (priv->count % 100 >= priv->int_ratio && folio_nid(folio) != 1)
+	else if (target_nid == 1 && folio_nid(folio) != 1)
 		list_add(&folio->lru, &priv->remote_folios);
 	else
 		folio_putback_lru(folio);
 
 	priv->count++;
 
+put_pol:
+	mpol_put(pol);
 put_folio:
 	folio_put(folio);
 
@@ -698,6 +712,7 @@ put_folio:
 static unsigned long damos_va_interleave(struct damon_target *target,
 		struct damon_region *r, struct damos *s)
 {
+	struct task_struct *task;
 	struct damos_va_interleave_private priv;
 	struct mm_struct *mm;
 	int ret;
@@ -714,9 +729,22 @@ static unsigned long damos_va_interleave(struct damon_target *target,
 	priv.int_ratio = 50;
 	priv.count = 0;
 
+	task = damon_get_task_struct(target);
+	if (!task)
+		return 0;
+
 	mm = damon_get_mm(target);
 	if (!mm)
 		return 0;
+
+	if (!task->mempolicy || task->mempolicy->mode != MPOL_WEIGHTED_INTERLEAVE) {
+		// Nodes 0 and 1
+		nodemask_t nodes;
+		nodes_clear(nodes);
+		node_set(0, nodes);
+		node_set(1, nodes);
+		do_set_mempolicy(MPOL_WEIGHTED_INTERLEAVE, 0, &nodes);
+	}
 
 	mmap_read_lock(mm);
 
