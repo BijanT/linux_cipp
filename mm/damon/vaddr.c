@@ -652,21 +652,13 @@ static unsigned long damos_madvise(struct damon_target *target,
 }
 #endif	/* CONFIG_ADVISE_SYSCALLS */
 
-struct damos_va_interleave_private {
-	struct list_head local_folios;
-	struct list_head remote_folios;
-	struct damos *scheme;
-	int int_ratio;
-	unsigned long count;
-};
-
 static int damos_interleave_pte(pte_t *pte, unsigned long addr,
 		unsigned long next, struct mm_walk *walk)
 {
 	struct mempolicy *pol;
 	pgoff_t ilx;
 	int target_nid;
-	struct damos_va_interleave_private *priv = walk->private;
+	struct damos_interleave_private *priv = walk->private;
 	struct folio *folio;
 
 	if (pte_none(*pte) || !pte_present(*pte))
@@ -699,12 +691,10 @@ static int damos_interleave_pte(pte_t *pte, unsigned long addr,
 	else
 		folio_putback_lru(folio);
 
-	priv->count++;
-
-put_pol:
-	mpol_put(pol);
 put_folio:
 	folio_put(folio);
+put_pol:
+	mpol_put(pol);
 
 	return 0;
 }
@@ -713,7 +703,7 @@ static unsigned long damos_va_interleave(struct damon_target *target,
 		struct damon_region *r, struct damos *s)
 {
 	struct task_struct *task;
-	struct damos_va_interleave_private priv;
+	struct damos_interleave_private priv;
 	struct mm_struct *mm;
 	int ret;
 	unsigned long applied;
@@ -726,8 +716,6 @@ static unsigned long damos_va_interleave(struct damon_target *target,
 	INIT_LIST_HEAD(&priv.local_folios);
 	INIT_LIST_HEAD(&priv.remote_folios);
 	priv.scheme = s;
-	priv.int_ratio = 50;
-	priv.count = 0;
 
 	task = damon_get_task_struct(target);
 	if (!task)
