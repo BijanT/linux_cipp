@@ -246,7 +246,8 @@ static bool __damos_filter_out_folio(struct damos_filter *filter,
 			damon_folio_mkold(folio);
 		break;
 	default:
-		break;
+		/* The other filters were handled elsewhere, so don't filter them here */
+		return false;
 	}
 
 	return matched == filter->matching;
