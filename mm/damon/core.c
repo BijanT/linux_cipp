@@ -1837,14 +1837,28 @@ static bool kdamond_need_stop(struct damon_ctx *ctx)
 static int damos_get_wmark_metric_value(struct damos_watermarks *wmarks,
 					unsigned long *metric_value)
 {
+	struct pglist_data *pgdat;
+	struct zone *zone;
+	unsigned long free_pages = 0;
+	unsigned long total_pages = 0;
+
 	switch (wmarks->metric) {
 	case DAMOS_WMARK_FREE_MEM_RATE:
 		*metric_value = global_zone_page_state(NR_FREE_PAGES) * 1000 /
 		       totalram_pages();
 		return 0;
-    case DAMOS_WMARK_SYSFS:
-        *metric_value = wmarks->sysfs_val;
-        return 0;
+	case DAMOS_WMARK_NODE_FREE_MEM_RATE:
+		pgdat = NODE_DATA(wmarks->nid);
+		for (int i = 0; i < MAX_NR_ZONES; i++) {
+			zone = &pgdat->node_zones[i];
+			free_pages += zone_page_state(zone, NR_FREE_PAGES);
+			total_pages += zone_managed_pages(zone);
+		}
+		*metric_value = free_pages * 1000 / total_pages;
+		return 0;
+	case DAMOS_WMARK_SYSFS:
+		*metric_value = wmarks->sysfs_val;
+		return 0;
 	default:
 		break;
 	}
