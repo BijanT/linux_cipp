@@ -158,8 +158,6 @@ static u8 get_il_weight(int node)
 	table = rcu_dereference(iw_table);
 	/* if no iw_table, use system default */
 	weight = table ? table[node] : 1;
-	/* if value in iw_table is 0, use system default */
-	weight = weight ? weight : 1;
 	rcu_read_unlock();
 	return weight;
 }
@@ -1981,6 +1979,7 @@ static unsigned int weighted_interleave_nid(struct mempolicy *pol, pgoff_t ilx)
 	unsigned int weight_total = 0;
 	u8 weight;
 	int nid;
+	int first_nid = NUMA_NO_NODE;
 
 	nr_nodes = read_once_policy_nodemask(pol, &nodemask);
 	if (!nr_nodes)
@@ -1992,17 +1991,24 @@ static unsigned int weighted_interleave_nid(struct mempolicy *pol, pgoff_t ilx)
 	for_each_node_mask(nid, nodemask) {
 		/* detect system default usage */
 		weight = table ? table[nid] : 1;
-		weight = weight ? weight : 1;
 		weight_total += weight;
+
+		if (first_nid == NUMA_NO_NODE && weight != 0)
+			first_nid = nid;
 	}
 
 	/* Calculate the node offset based on totals */
+	if (first_nid != NUMA_NO_NODE)
+		nid = first_nid;
+	else
+		nid = first_node(nodemask);
+
+	if (weight_total == 0)
+		return nid;
 	target = ilx % weight_total;
-	nid = first_node(nodemask);
 	while (target) {
 		/* detect system default usage */
 		weight = table ? table[nid] : 1;
-		weight = weight ? weight : 1;
 		if (target < weight)
 			break;
 		target -= weight;
