@@ -1189,11 +1189,23 @@ static bool damos_valid_target(struct damon_ctx *c, struct damon_target *t,
 		struct damon_region *r, struct damos *s)
 {
 	bool ret = __damos_valid_target(r, s);
+	bool addr_valid = r->ar.start < 0x140000000;
+	int score;
+
+	if (addr_valid && !ret && s->action == DAMOS_MIGRATE_COLD)
+		pr_err("not ret\n");
+	if (addr_valid && !s->quota.esz && s->action == DAMOS_MIGRATE_COLD)
+		pr_err("not qupta\n");
+	if (addr_valid && !c->ops.get_scheme_score && s->action == DAMOS_MIGRATE_COLD)
+		pr_err("not scheme score\n");
 
 	if (!ret || !s->quota.esz || !c->ops.get_scheme_score)
 		return ret;
 
-	return c->ops.get_scheme_score(c, t, r, s) >= s->quota.min_score;
+	score = c->ops.get_scheme_score(c, t, r, s);
+	if (addr_valid && score < s->quota.min_score && s->action == DAMOS_MIGRATE_COLD)
+		pr_err("score violation %d < %d\n", score, s->quota.min_score);
+	return score >= s->quota.min_score;
 }
 
 /*
@@ -1413,14 +1425,26 @@ static void damon_do_apply_schemes(struct damon_ctx *c,
 			continue;
 
 		/* Check the quota */
-		if (quota->esz && quota->charged_sz >= quota->esz)
+		if (quota->esz && quota->charged_sz >= quota->esz) {
+			if (s->action == DAMOS_MIGRATE_COLD) {
+				pr_err("%lx quota %lx %lx\n", r->ar.start, quota->esz, quota->charged_sz);
+			}
 			continue;
+		}
 
-		if (damos_skip_charged_region(t, &r, s))
+		if (damos_skip_charged_region(t, &r, s)) {
+			if (s->action == DAMOS_MIGRATE_COLD) {
+				pr_err("%lx skip charged\n", r->ar.start);
+			}
 			continue;
+		}
 
-		if (!damos_valid_target(c, t, r, s))
+		if (!damos_valid_target(c, t, r, s)) {
+			if (s->action == DAMOS_MIGRATE_COLD) {
+				pr_err("%lx not valid\n", r->ar.start);
+			}
 			continue;
+		}
 
 		damos_apply_scheme(c, t, r, s);
 	}
