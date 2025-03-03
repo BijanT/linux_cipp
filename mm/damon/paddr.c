@@ -307,35 +307,24 @@ unsigned long damon_migrate_pages(struct list_head *folio_list,
 static unsigned long damon_pa_migrate(struct damon_region *r, struct damos *s)
 {
 	unsigned long addr, applied;
-	unsigned long size = (r->ar.end - r->ar.start) / PAGE_SIZE;
-	unsigned long not_folio = 0;
-	unsigned long filtered_out = 0;
-	unsigned long no_isolate_lru = 0;
 	LIST_HEAD(folio_list);
 
 	for (addr = r->ar.start; addr < r->ar.end; addr += PAGE_SIZE) {
 		struct folio *folio = damon_get_folio(PHYS_PFN(addr));
 
-		if (!folio) {
-			not_folio++;
+		if (!folio)
 			continue;
-		}
 
-		if (damos_filter_out_folio(s, folio)) {
-			filtered_out++;
+		if (damos_filter_out_folio(s, folio))
 			goto put_folio;
-		}
 
-		if (!folio_isolate_lru(folio)) {
-			no_isolate_lru++;
+		if (!folio_isolate_lru(folio))
 			goto put_folio;
-		}
 		list_add(&folio->lru, &folio_list);
 put_folio:
 		folio_put(folio);
 	}
 	applied = damon_migrate_pages(&folio_list, s->target_nid);
-	pr_err("size %ld %ld %ld %ld %ld\n", size, not_folio, filtered_out, no_isolate_lru, applied);
 	cond_resched();
 	return applied * PAGE_SIZE;
 }

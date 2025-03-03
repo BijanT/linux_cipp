@@ -1189,23 +1189,11 @@ static bool damos_valid_target(struct damon_ctx *c, struct damon_target *t,
 		struct damon_region *r, struct damos *s)
 {
 	bool ret = __damos_valid_target(r, s);
-	bool addr_valid = r->ar.start < 0x140000000;
-	int score;
-
-	if (addr_valid && !ret && s->action == DAMOS_MIGRATE_COLD)
-		pr_err("not ret\n");
-	if (addr_valid && !s->quota.esz && s->action == DAMOS_MIGRATE_COLD)
-		pr_err("not qupta\n");
-	if (addr_valid && !c->ops.get_scheme_score && s->action == DAMOS_MIGRATE_COLD)
-		pr_err("not scheme score\n");
 
 	if (!ret || !s->quota.esz || !c->ops.get_scheme_score)
 		return ret;
 
-	score = c->ops.get_scheme_score(c, t, r, s);
-	if (addr_valid && score < s->quota.min_score && s->action == DAMOS_MIGRATE_COLD)
-		pr_err("score violation %d < %d\n", score, s->quota.min_score);
-	return score >= s->quota.min_score;
+	return c->ops.get_scheme_score(c, t, r, s) >= s->quota.min_score;
 }
 
 /*
@@ -1396,7 +1384,7 @@ static void damos_apply_scheme(struct damon_ctx *c, struct damon_target *t,
 		ktime_get_coarse_ts64(&end);
 		quota->total_charged_ns += timespec64_to_ns(&end) -
 			timespec64_to_ns(&begin);
-		quota->charged_sz += sz;
+		quota->charged_sz += sz_applied;
 		if (quota->esz && quota->charged_sz >= quota->esz) {
 			quota->charge_target_from = t;
 			quota->charge_addr_from = r->ar.end + 1;
@@ -1426,23 +1414,14 @@ static void damon_do_apply_schemes(struct damon_ctx *c,
 
 		/* Check the quota */
 		if (quota->esz && quota->charged_sz >= quota->esz) {
-			if (s->action == DAMOS_MIGRATE_COLD) {
-				pr_err("%lx quota %lx %lx\n", r->ar.start, quota->esz, quota->charged_sz);
-			}
 			continue;
 		}
 
 		if (damos_skip_charged_region(t, &r, s)) {
-			if (s->action == DAMOS_MIGRATE_COLD) {
-				pr_err("%lx skip charged\n", r->ar.start);
-			}
 			continue;
 		}
 
 		if (!damos_valid_target(c, t, r, s)) {
-			if (s->action == DAMOS_MIGRATE_COLD) {
-				pr_err("%lx not valid\n", r->ar.start);
-			}
 			continue;
 		}
 
@@ -1652,8 +1631,13 @@ static void kdamond_apply_schemes(struct damon_ctx *c)
 		return;
 
 	damon_for_each_target(t, c) {
-		damon_for_each_region_safe(r, next_r, t)
+		r = list_first_entry(&t->regions_list, struct damon_region, list);
+		next_r = list_next_entry(r, list);
+		while (!list_entry_is_head(r, &t->regions_list, list)) {
 			damon_do_apply_schemes(c, t, r);
+			r = next_r;
+			next_r = list_next_entry(next_r, list);
+		}
 	}
 
 	damon_for_each_scheme(s, c) {
