@@ -1808,6 +1808,30 @@ static void kdamond_split_regions(struct damon_ctx *ctx)
 	last_nr_regions = nr_regions;
 }
 
+// Split the regions in the DAMON context so there are at least ctx->attrs.min_nr_regions
+static void kdamond_initial_region_split(struct damon_ctx *ctx, unsigned long sz)
+{
+	struct damon_target *t;
+	struct damon_region *r;
+	unsigned long sz_region;
+
+	damon_for_each_target(t, ctx) {
+		r = list_first_entry(&t->regions_list, struct damon_region, list);
+
+		while (!list_entry_is_head(r, &t->regions_list, list)) {
+			sz_region = damon_sz_region(r);
+
+			if (sz_region <= sz)
+				goto next;
+
+			damon_split_region_at(t, r, sz);
+
+next:
+			r = list_next_entry(r, list);
+		}
+	}
+}
+
 /*
  * Check whether current monitoring should be stopped
  *
@@ -1976,6 +2000,7 @@ static int kdamond_fn(void *data)
 		goto done;
 
 	sz_limit = damon_region_sz_limit(ctx);
+	kdamond_initial_region_split(ctx, sz_limit);
 
 	while (!kdamond_need_stop(ctx)) {
 		/*
