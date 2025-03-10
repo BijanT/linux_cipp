@@ -2081,6 +2081,15 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 
 	target_nid = numa_migrate_check(folio, vmf, haddr, &flags, writable,
 					&last_cpupid);
+
+	/*
+	colloid
+	Move pages away from local NUMA if congested
+	*/
+	if (nid == numa_node_id() && target_nid == NUMA_NO_NODE) {
+		target_nid = numa_migrate_memory_away_target(folio, nid);
+	}
+
 	if (target_nid == NUMA_NO_NODE)
 		goto out_map;
 	if (migrate_misplaced_folio_prepare(folio, vma, target_nid)) {
@@ -2445,7 +2454,10 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		 * Skip scanning top tier node if normal numa
 		 * balancing is disabled
 		 */
+		// Enable hint faults for top tier nodes in colloid
 		if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL) &&
+			!(sysctl_numa_balancing_mode & NUMA_BALANCING_COLLOID &&
+			  sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING) &&
 		    toptier)
 			goto unlock;
 
