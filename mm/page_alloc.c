@@ -5246,6 +5246,9 @@ static void build_thisnode_zonelists(pg_data_t *pgdat)
 	zonerefs->zone_idx = 0;
 }
 
+#define COLLOID_LOCAL_NUMA 0
+#define COLLOID_REMOTE_NUMA 1
+
 /*
  * Build zonelists ordered by zone and nodes within zones.
  * This results in conserving DMA zone[s] until all Normal memory is
@@ -5259,6 +5262,7 @@ static void build_zonelists(pg_data_t *pgdat)
 	int node, nr_nodes = 0;
 	nodemask_t used_mask = NODE_MASK_NONE;
 	int local_node, prev_node;
+	int colloid_remote_idx;
 
 	/* NUMA-aware ordering of nodes */
 	local_node = pgdat->node_id;
@@ -5277,6 +5281,23 @@ static void build_zonelists(pg_data_t *pgdat)
 
 		node_order[nr_nodes++] = node;
 		prev_node = node;
+	}
+
+	// Colloid: overwrite node order for colloid local numa node
+	if (local_node == COLLOID_LOCAL_NUMA) {
+		colloid_remote_idx = -1;
+		for (node = 0; node < nr_nodes; node++) {
+			if (node_order[node] == COLLOID_REMOTE_NUMA) {
+				colloid_remote_idx = node;
+				break;
+			}
+		}
+		// Make sure colloid remote node is second in the list
+		while (colloid_remote_idx > 1) {
+			node_order[colloid_remote_idx] = node_order[colloid_remote_idx-1];
+			node_order[colloid_remote_idx-1] = COLLOID_REMOTE_NUMA;
+			colloid_remote_idx--;
+		}
 	}
 
 	build_zonelists_in_node_order(pgdat, node_order, nr_nodes);

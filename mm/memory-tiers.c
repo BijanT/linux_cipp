@@ -112,6 +112,11 @@ static int top_tier_adistance;
 static struct demotion_nodes *node_demotion __read_mostly;
 #endif /* CONFIG_MIGRATION */
 
+int colloid_local_lat_gt_remote = 0;
+EXPORT_SYMBOL(colloid_local_lat_gt_remote);
+int colloid_nid_of_interest = NUMA_NO_NODE;
+EXPORT_SYMBOL(colloid_nid_of_interest);
+
 static BLOCKING_NOTIFIER_HEAD(mt_adistance_algorithms);
 
 /* The lock is used to protect `default_dram_perf*` info and nid. */
@@ -279,6 +284,7 @@ out:
 	rcu_read_unlock();
 	return toptier;
 }
+EXPORT_SYMBOL_GPL(node_is_toptier);
 
 void node_get_allowed_targets(pg_data_t *pgdat, nodemask_t *targets)
 {
@@ -342,6 +348,7 @@ int next_demotion_node(int node)
 
 	return target;
 }
+EXPORT_SYMBOL_GPL(next_demotion_node);
 
 static void disable_all_demotion_targets(void)
 {
@@ -454,19 +461,24 @@ static void establish_demotion_targets(void)
 	 * Once we detect such a memory tier, we consider that tier
 	 * as top tiper from which promotion is not allowed.
 	 */
-	list_for_each_entry_reverse(memtier, &memory_tiers, list) {
-		tier_nodes = get_memtier_nodemask(memtier);
-		nodes_and(tier_nodes, node_states[N_CPU], tier_nodes);
-		if (!nodes_empty(tier_nodes)) {
-			/*
-			 * abstract distance below the max value of this memtier
-			 * is considered toptier.
-			 */
-			top_tier_adistance = memtier->adistance_start +
-						MEMTIER_CHUNK_SIZE - 1;
-			break;
-		}
-	}
+	//list_for_each_entry_reverse(memtier, &memory_tiers, list) {
+	//	tier_nodes = get_memtier_nodemask(memtier);
+	//	nodes_and(tier_nodes, node_states[N_CPU], tier_nodes);
+	//	if (!nodes_empty(tier_nodes)) {
+	//		/*
+	//		 * abstract distance below the max value of this memtier
+	//		 * is considered toptier.
+	//		 */
+	//		top_tier_adistance = memtier->adistance_start +
+	//					MEMTIER_CHUNK_SIZE - 1;
+	//		break;
+	//	}
+	//}
+
+	// midhul. colloid: Overriding top_tier_adistance to always be default dram adistance
+	// This enabled putting normal NUMA nodes (with CPUs) int lower memory tiers
+	top_tier_adistance = round_down(default_dram_type->adistance, MEMTIER_CHUNK_SIZE) + MEMTIER_CHUNK_SIZE - 1;
+	pr_info("colloid: top_tier_adistance set to %d", top_tier_adistance);
 	/*
 	 * Now build the lower_tier mask for each node collecting node mask from
 	 * all memory tier below it. This allows us to fallback demotion page
@@ -880,6 +892,43 @@ static int __meminit memtier_hotplug_callback(struct notifier_block *self,
 
 	return notifier_from_errno(0);
 }
+
+struct memory_dev_type *colloid_get_default_dram_memtype() {
+	return default_dram_type;
+}
+EXPORT_SYMBOL_GPL(colloid_get_default_dram_memtype);
+
+void colloid_init_memory_tier(int node) {
+	struct memory_tier *memtier;
+
+	if (node_state(node, N_CPU)) {
+		pr_info("colloid: NUMA node is NOT zero CPU");
+	} else {
+		pr_info("colloid: NUMA node is zero CPU");
+	}
+
+	mutex_lock(&memory_tier_lock);
+	memtier = set_node_memory_tier(node);
+	if (!IS_ERR(memtier)) {
+		pr_info("set_node_memory_tier success");
+		establish_demotion_targets();
+		pr_info("established demotion targets");
+	}
+	mutex_unlock(&memory_tier_lock);
+}
+EXPORT_SYMBOL_GPL(colloid_init_memory_tier);
+
+void colloid_clear_memory_tier(int node) {
+	struct memory_tier *memtier;
+
+	mutex_lock(&memory_tier_lock);
+	clear_node_memory_tier(node);
+	pr_info("clear_node_memory_tier");
+	establish_demotion_targets();
+	pr_info("established demotion targets");
+	mutex_unlock(&memory_tier_lock);
+}
+EXPORT_SYMBOL_GPL(colloid_clear_memory_tier);
 
 static int __init memory_tier_init(void)
 {

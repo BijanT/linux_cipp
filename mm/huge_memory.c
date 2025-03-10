@@ -1715,6 +1715,15 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 	if (node_is_toptier(nid))
 		last_cpupid = folio_last_cpupid(folio);
 	target_nid = numa_migrate_prep(folio, vmf, haddr, nid, &flags);
+
+	/*
+	colloid
+	Move pages away from local NUMA if congested
+	*/
+	if (nid == numa_node_id() && target_nid == NUMA_NO_NODE) {
+		target_nid = numa_migrate_memory_away_target(folio, nid);
+	}
+
 	if (target_nid == NUMA_NO_NODE)
 		goto out_map;
 	if (migrate_misplaced_folio_prepare(folio, vma, target_nid)) {
@@ -2058,12 +2067,17 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		 * Skip scanning top tier node if normal numa
 		 * balancing is disabled
 		 */
+		// Enable hint faults for top tier nodes in colloid
 		if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL) &&
+			!(sysctl_numa_balancing_mode & NUMA_BALANCING_COLLOID &&
+			  sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING) &&
 		    toptier)
 			goto unlock;
 
+		// Record access time in page flags for top tier if colloid is enabled and normal numa balancing is not
 		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING &&
-		    !toptier)
+		    (!toptier || ((sysctl_numa_balancing_mode & NUMA_BALANCING_COLLOID) &&
+						 !(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL))))
 			folio_xchg_access_time(folio,
 					       jiffies_to_msecs(jiffies));
 	}

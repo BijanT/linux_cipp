@@ -32,6 +32,7 @@ extern void set_numabalancing_state(bool enabled);
 extern void task_numa_free(struct task_struct *p, bool final);
 bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 				int src_nid, int dst_cpu);
+extern int numa_migrate_memory_away_target(struct folio *folio, int src_nid);
 #else
 static inline void task_numa_fault(int last_node, int node, int pages,
 				   int flags)
@@ -51,6 +52,11 @@ static inline bool should_numa_migrate_memory(struct task_struct *p,
 				struct folio *folio, int src_nid, int dst_cpu)
 {
 	return true;
+}
+
+static inline int numa_migrate_memory_away_target(struct folio *folio, int src_nid)
+{
+	return NUMA_NO_NODE;
 }
 #endif
 

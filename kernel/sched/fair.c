@@ -48,6 +48,7 @@
 #include <linux/ratelimit.h>
 #include <linux/task_work.h>
 #include <linux/rbtree_augmented.h>
+#include <linux/swap.h>
 
 #include <asm/switch_to.h>
 
@@ -55,6 +56,8 @@
 #include "stats.h"
 #include "autogroup.h"
 
+extern int colloid_local_lat_gt_remote;
+extern int colloid_nid_of_interest;
 /*
  * The initial- and re-scaling of tunables is configurable
  *
@@ -1846,6 +1849,10 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 		unsigned long rate_limit;
 		unsigned int latency, th, def_th;
 
+		// Colloid
+		if (!node_is_toptier(dst_nid))
+			return false;
+
 		pgdat = NODE_DATA(dst_nid);
 		if (pgdat_free_space_enough(pgdat)) {
 			/* workload changed, reset hot threshold */
@@ -1863,9 +1870,19 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 		if (latency >= th)
 			return false;
 
+		if (sysctl_numa_balancing_mode & NUMA_BALANCING_COLLOID &&
+			colloid_nid_of_interest == dst_nid &&
+			READ_ONCE(colloid_local_lat_gt_remote))
+			return false;
+
 		return !numa_promotion_rate_limit(pgdat, rate_limit,
 						  folio_nr_pages(folio));
 	}
+
+	/*In colloid, since we enable local hint faults, we may reach here
+	even if normal numa balancing is off. In that case, avoid going any further. */
+	if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL))
+		return false;
 
 	this_cpupid = cpu_pid_to_cpupid(dst_cpu, current->pid);
 	last_cpupid = folio_xchg_last_cpupid(folio, this_cpupid);
@@ -1931,6 +1948,43 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 	 */
 	return group_faults_cpu(ng, dst_nid) * group_faults(p, src_nid) * 3 >
 	       group_faults_cpu(ng, src_nid) * group_faults(p, dst_nid) * 4;
+}
+
+/*
+colloid
+Should we migrate page away from local NUMA node due to congestion?
+if yes, returns nid of destination node
+otherwise returns NUMA_NO_NODE
+*/
+int numa_migrate_memory_away_target(struct folio *folio, int src_nid) {
+	unsigned int latency, th;
+	if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING &&
+		  sysctl_numa_balancing_mode & NUMA_BALANCING_COLLOID))
+		return NUMA_NO_NODE;
+
+	if (src_nid != colloid_nid_of_interest)
+		return NUMA_NO_NODE;
+
+	if (!READ_ONCE(colloid_local_lat_gt_remote))
+		return NUMA_NO_NODE;
+
+	// Local memory is congested
+	if (sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL) {
+		// No timestamp, use active/inactive list to determine hotness
+		// Do not move pages that are not in the active list
+		if (!folio_test_active(folio)) {
+			folio_mark_accessed(folio);
+			return NUMA_NO_NODE;
+		}
+	} else {
+		// Timestamp in page flags. use hint fault latency to determine hotness
+		th = NODE_DATA(src_nid)->nbp_threshold ? : sysctl_numa_balancing_hot_threshold;
+		latency = numa_hint_fault_latency(folio);
+		if (latency >= th)
+			return NUMA_NO_NODE;
+	}
+
+	return next_demotion_node(src_nid);
 }
 
 /*
@@ -3091,6 +3145,10 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	if (!node_is_toptier(mem_node) &&
 	    (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING ||
 	     !cpupid_valid(last_cpupid)))
+		return;
+
+	/*colloid: NUMA fault stats not necessary when normal NUMA balancing is off*/
+	if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL))
 		return;
 
 	/* Allocate buffer to track faults on a per-node basis */

@@ -149,6 +149,8 @@ static long change_pte_range(struct mmu_gather *tlb,
 				 * Don't mess with PTEs if page is already on the node
 				 * a single-threaded process is running on.
 				 */
+				// TODO: Update this for colloid; want hint faults even for single-threaded process
+				// TODO: After making this update, make sure to test with mlocked memory
 				nid = folio_nid(folio);
 				if (target_node == nid)
 					continue;
@@ -158,11 +160,16 @@ static long change_pte_range(struct mmu_gather *tlb,
 				 * Skip scanning top tier node if normal numa
 				 * balancing is disabled
 				 */
+				// Enable hint faults for top tier nodes in colloid
 				if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL) &&
+					!(sysctl_numa_balancing_mode & NUMA_BALANCING_COLLOID &&
+					  sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING) &&
 				    toptier)
 					continue;
+				// Record access time in page flags for top tier if colloid is enabled and normal numa balancing is not
 				if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING &&
-				    !toptier)
+				    (!toptier || ((sysctl_numa_balancing_mode & NUMA_BALANCING_COLLOID) &&
+								 !(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL))))
 					folio_xchg_access_time(folio,
 						jiffies_to_msecs(jiffies));
 			}
