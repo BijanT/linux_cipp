@@ -793,6 +793,7 @@ int damon_set_region_biggest_system_ram_default(struct damon_target *t,
 struct damos_interleave_private {
 	struct list_head local_folios;
 	struct list_head remote_folios;
+	bool putback_lru;
 	struct damos *scheme;
 };
 

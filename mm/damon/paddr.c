@@ -370,12 +370,13 @@ static bool damon_pa_interleave_rmap(struct folio *folio, struct vm_area_struct 
 	policy_nodemask(0, pol, ilx, &target_nid);
 
 	// Only move the pages if they are in the opposite node
-	if (target_nid == 0 && folio_nid(folio) != 0)
+	if (target_nid == 0 && folio_nid(folio) != 0) {
 		list_add(&folio->lru, &priv->local_folios);
-	else if (target_nid == 1 && folio_nid(folio) != 1)
+		priv->putback_lru = false;
+	} else if (target_nid == 1 && folio_nid(folio) != 1) {
 		list_add(&folio->lru, &priv->remote_folios);
-	else
-		folio_putback_lru(folio);
+		priv->putback_lru = false;
+    }
 
 	mpol_cond_put(pol);
 
@@ -414,7 +415,11 @@ static unsigned long damon_pa_interleave(struct damon_region *r, struct damos *s
 		if (!folio_isolate_lru(folio))
 			goto put_folio;
 
+		priv.putback_lru = true;
 		rmap_walk(folio, &rwc);
+
+		if (priv.putback_lru)
+			folio_putback_lru(folio);
 put_folio:
 		addr += folio_size(folio);
 		folio_put(folio);
