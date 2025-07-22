@@ -2029,13 +2029,14 @@ bool apply_policy_zone(struct mempolicy *policy, enum zone_type zone)
 static unsigned int weighted_interleave_nodes(struct mempolicy *policy)
 {
 	unsigned int node;
+	unsigned int first_node;
 	unsigned int cpuset_mems_cookie;
 
 retry:
 	/* to prevent miscount use tsk->mems_allowed_seq to detect rebind */
 	cpuset_mems_cookie = read_mems_allowed_begin();
-	node = current->il_prev;
-	if (!current->il_weight || !node_isset(node, policy->nodes)) {
+	first_node = node = current->il_prev;
+	while (!current->il_weight || !node_isset(node, policy->nodes)) {
 		node = next_node_in(node, policy->nodes);
 		if (read_mems_allowed_retry(cpuset_mems_cookie))
 			goto retry;
@@ -2043,6 +2044,10 @@ retry:
 			return node;
 		current->il_prev = node;
 		current->il_weight = get_il_weight(node);
+
+		/* If all the weights are 0, just return the current node */
+		if (node == first_node)
+			break;
 	}
 	current->il_weight--;
 	return node;
@@ -2138,6 +2143,7 @@ static unsigned int weighted_interleave_nid(struct mempolicy *pol, pgoff_t ilx)
 	unsigned int weight_total = 0;
 	u8 weight;
 	int nid = 0;
+	int first_nid = NUMA_NO_NODE;
 
 	nr_nodes = read_once_policy_nodemask(pol, &nodemask);
 	if (!nr_nodes)
@@ -2151,12 +2157,19 @@ static unsigned int weighted_interleave_nid(struct mempolicy *pol, pgoff_t ilx)
 		table = state->iw_table;
 
 	/* calculate the total weight */
-	for_each_node_mask(nid, nodemask)
+	for_each_node_mask(nid, nodemask) {
 		weight_total += table ? table[nid] : 1;
 
+		if (first_nid == NUMA_NO_NODE && weight_total != 0)
+			first_nid = nid;
+	}
+
 	/* Calculate the node offset based on totals */
+	if (weight_total == 0)
+		return first_node(nodemask);
+
 	target = ilx % weight_total;
-	nid = first_node(nodemask);
+	nid = first_nid;
 	while (target) {
 		/* detect system default usage */
 		weight = table ? table[nid] : 1;
@@ -3569,7 +3582,7 @@ static ssize_t node_store(struct kobject *kobj, struct kobj_attribute *attr,
 
 	node_attr = container_of(attr, struct iw_node_attr, kobj_attr);
 	if (count == 0 || sysfs_streq(buf, "") ||
-	    kstrtou8(buf, 0, &weight) || weight == 0)
+	    kstrtou8(buf, 0, &weight))
 		return -EINVAL;
 
 	new_wi_state = kzalloc(struct_size(new_wi_state, iw_table, nr_node_ids),
