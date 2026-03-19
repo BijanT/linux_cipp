@@ -2054,7 +2054,7 @@ static void damos_set_effective_quota(struct damos_quota *quota)
 		unsigned long score = damos_quota_score(quota);
 
 		quota->esz_bp = damon_feed_loop_next_input(
-				max(quota->esz_bp, 10000UL),
+				max(quota->esz_bp, HPAGE_SIZE * 10000UL),
 				score);
 		esz = quota->esz_bp / 10000;
 	}
